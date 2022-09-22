@@ -3,7 +3,7 @@ import random
 import numpy as np
 import json
 import os
-
+import time
 
 class UnityEyesDataCreator:
 
@@ -14,11 +14,14 @@ class UnityEyesDataCreator:
         self.image_count = 0
         self.velocity = np.asarray([random.randint(0, 5), random.randint(0, 5)])
         self.moment = np.asarray([random.randint(0, 2), random.randint(0, 2)])
-        self.mouse_location = self.find_center()
-        self.center = self.find_center()
-        self.command_lclick_eyes_at_loc(self.mouse_location)
+        # self.mouse_location = None #self.find_center()
+        self.center = None # self.find_center()
+        # self.command_lclick_eyes_at_loc(self.mouse_location)
         self.frames_per_id = frames_per_id
-        self.unity_path = "C:\work\UnityEyes_Windows"
+        self.unity_path = "C:\\work\\UnityEyes_Windows"
+        self._center_guess = [500, 500]
+        self._x_correction = 0
+        self._y_correction = 0
 
     def get_looking_vec_json(self, json_path):
         """
@@ -31,16 +34,15 @@ class UnityEyesDataCreator:
         look_vec = list(eval(data['eye_details']['look_vec']))
         return look_vec
 
-    def get_first_json(self):
+    def get_first_json_path(self):
         return os.path.join(self.unity_path, "imgs", "1.json")
-
 
     def command_lclick_eyes_at_rel(self, relative_distance):
         pyg.moveRel(relative_distance[0], relative_distance[1], duration=0)
         pyg.click(button='middle')
 
-    def command_lclick_eyes_at_loc(self, location):
-        pyg.click(location[0], location[1], button='middle')
+    def command_click_eyes_at_loc(self, location):
+        pyg.middleClick(location[0], location[1]) #, button='middle')
 
     def command_randomize_id(self):
         """
@@ -60,7 +62,12 @@ class UnityEyesDataCreator:
         randomize illumination
         """
         pyg.typewrite("l")
-
+    def get_current_looking_vec(self):
+        self.command_save_image()
+        time.sleep(0.01)
+        current_looking_vec = self.get_looking_vec_json(self.get_first_json_path())
+        os.remove(self.get_first_json_path())
+        return current_looking_vec
     def command_save_image(self):
         """
         save image at location
@@ -68,22 +75,52 @@ class UnityEyesDataCreator:
         pyg.typewrite("s")
 
     def find_center(self):
-        '''
+        """
         turn eye to face camera. the look vec is positive when the eye looks to the right and upwards
         :return:
-        '''
-        print("TODO find center")
-        for step_size in [10,1,0.1,0.01,0.001,0.0001,0.00001]:
+        """
+        for step_size in [1, 0.1, 0.01, 0.001, 0.0001, 0.00001]:
+            x_looping = False
             while True:
-
-                current_look_vec = self.get_looking_vec_json(self.get_first_json())
+                self.command_click_eyes_at_loc(self._center_guess)
+                current_look_vec = self.get_current_looking_vec()
                 x_look_vec = current_look_vec[0]
                 y_look_vec = current_look_vec[1]
                 if x_look_vec == y_look_vec == 0:
-                    return True
-                if x_look_vec > 0:
+                    self.center = self._center_guess
+                    return self.center
+                else:
+                    if x_look_vec > 0:
+                        if self._x_correction == 1:
+                            # reduce step size
+                            x_looping = True
+                            # break
 
-        center_guess = [500, 500]
+                        self._x_correction = -1
+                    else:
+                        if self._x_correction == -1:
+                            # reduce step size
+                            x_looping = True
+                            # break
+                        self._x_correction = 1
+
+                    if y_look_vec > 0:
+                        if self._y_correction == 1:
+                            # reduce step size
+                            if x_looping:
+                                break
+                        self._y_correction = -1
+                    else:
+                        if self._y_correction == -1:
+                            # reduce step size
+                            if x_looping:
+                                break
+                        self._y_correction = 1
+
+                    self._center_guess = [self._center_guess[0] + self._x_correction * step_size,
+                                          self._center_guess[1] + self._y_correction * step_size]
+                    print(f"Guess {self._center_guess}")
+
 
     def get_last_image_gaze_angle(self):
         pass
@@ -133,7 +170,7 @@ class UnityEyesDataCreator:
         :return:
         """
         assert face_position in ['center', 'left']
-        face_dict = {'center': 5, 'left': 4, 'right': 6, "bottom": 2, "top":8}
+        face_dict = {'center': 5, 'left': 4, 'right': 6, "bottom": 2, "top": 8}
         return face_dict[face_position]
 
     def collect_dataset(self, face_position, ids, frames_per_id=40):
@@ -148,8 +185,23 @@ class UnityEyesDataCreator:
         self.face_position = self.determine_face_position(face_position)
         for id_idx in ids:
             self.change_id()
-            for frame_idx in self.frames_per_id:
+            for frame_idx in range(self.frames_per_id):
                 self.move_eyes()
                 self.collect_image()
 
+    def give_time_to_open_unity(self, sec=7):
+        for s in range(sec,0, -1):
+            print(f"Data collection will start in {s} seconds, open unity in the foreground")
+            # pyg.click(500+s, 500+s, button='MIDDLE')
+            time.sleep(1)
 
+    def displayMousePosition(self):
+        while True:
+            time.sleep(0.2)
+            pyg.displayMousePosition()
+
+if __name__ == "__main__":
+    dataset_creator = UnityEyesDataCreator(datatype="temporal", ids=1, frames_per_id=10)
+    dataset_creator.give_time_to_open_unity(4)
+    dataset_creator.find_center()
+    dataset_creator.displayMousePosition()
